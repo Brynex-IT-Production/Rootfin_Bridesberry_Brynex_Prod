@@ -18,7 +18,7 @@ const formatLocationName = (name) => {
         return "Warehouse";
     }
     if (/^brides\s*berry$/i.test(formatted) || /^bridesberry$/i.test(formatted)) {
-        return "BridesBerry";
+        return "Brides Berry";
     }
     if (/^g[-.\s]?mg\s*road$/i.test(formatted) || /^mg\s*road$/i.test(formatted) || /^suitorguy\s+mg\s*road$/i.test(formatted)) {
         return "MG Road";
@@ -54,8 +54,19 @@ const Header = (prop) => {
         try {
             const storedUser = JSON.parse(localStorage.getItem("rootfinuser"));
             if (storedUser) {
+                const isAdmin = storedUser.power === 'admin';
+                const isClusterManager = (storedUser.role || '').toLowerCase() === 'cluster_manager';
+
+                // For regular store users: NEVER overwrite their store name or locCode!
+                if (!isAdmin && !isClusterManager) {
+                    setCurrentUser(storedUser);
+                    setSelectedValue(storedUser.locCode || "");
+                    return;
+                }
+
+                // For admin or cluster manager: match their active location or default to Warehouse
                 const foundLoc = locations.find(loc => loc.locCode === storedUser.locCode);
-                const activeLoc = foundLoc || locations[0];
+                const activeLoc = foundLoc || locations.find(loc => loc.locCode === "858") || locations[0];
                 if (activeLoc) {
                     const updatedUser = {
                         ...storedUser,

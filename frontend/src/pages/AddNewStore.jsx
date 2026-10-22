@@ -3,6 +3,7 @@ import { FaEye, FaEyeSlash, FaTimes } from "react-icons/fa";
 import { Store } from "lucide-react";
 import baseUrl from "../api/api";
 import { useSidebar } from "../hooks/useSidebar.js";
+import { saveCustomStore } from "../utils/storeService.js";
 
 const AddNewStore = () => {
     const isSidebarOpen = useSidebar();
@@ -128,6 +129,14 @@ const AddNewStore = () => {
             const data = await response.json();
 
             if (response.ok) {
+                saveCustomStore({
+                    locCode,
+                    locName: username,
+                    name: username,
+                    address,
+                    phone,
+                    email
+                });
                 alert(data.message || "Store created successfully!");
                 // Reset form
                 setUsername("");

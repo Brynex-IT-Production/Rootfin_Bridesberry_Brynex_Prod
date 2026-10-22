@@ -105,6 +105,13 @@ const WAREHOUSE_NAME_MAPPING = {
   "HEAD OFFICE01": "Head Office",
   "Head Office": "Head Office",
   
+  // Brides Berry variations
+  "Brides Berry": "Brides Berry",
+  "BridesBerry": "Brides Berry",
+  "bridesberry": "Brides Berry",
+  "brides berry": "Brides Berry",
+  "Bridesberry": "Brides Berry",
+
   // Other locations (default to Warehouse)
   "Z-Edapally1": "Warehouse",
   "Z- Edappal": "Warehouse",
@@ -154,6 +161,14 @@ const matchesWarehouse = (itemWarehouse, targetWarehouse) => {
   
   // Exact match
   if (itemWarehouseLower === targetWarehouseLower) {
+    return true;
+  }
+
+  // Exact match ignoring spaces/hyphens (e.g., "Brides Berry" vs "BridesBerry")
+  if (
+    itemWarehouseLower.replace(/[\s\-_.]+/g, "") ===
+    targetWarehouseLower.replace(/[\s\-_.]+/g, "")
+  ) {
     return true;
   }
   
@@ -1601,6 +1616,14 @@ export const getTransferOrders = async (req, res) => {
       
       // Exact match
       if (orderWarehouseLower === targetWarehouseLower) {
+        return true;
+      }
+
+      // Exact match ignoring spaces/hyphens (e.g., "Brides Berry" vs "BridesBerry")
+      if (
+        orderWarehouseLower.replace(/[\s\-_.]+/g, "") ===
+        targetWarehouseLower.replace(/[\s\-_.]+/g, "")
+      ) {
         return true;
       }
       

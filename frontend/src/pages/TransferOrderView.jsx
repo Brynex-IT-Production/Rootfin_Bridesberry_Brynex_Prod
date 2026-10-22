@@ -27,6 +27,7 @@ const TransferOrderView = () => {
   const fallbackLocations = [
     { "locName": "Z-Edapally1", "locCode": "144" },
     { "locName": "Warehouse", "locCode": "858" },
+    { "locName": "Brides Berry", "locCode": "155" },
     { "locName": "G-Edappally", "locCode": "702" },
     { "locName": "HEAD OFFICE01", "locCode": "759" },
     { "locName": "SG-Trivandrum", "locCode": "700" },
@@ -78,6 +79,7 @@ const TransferOrderView = () => {
 
     if (orderWarehouseLower === targetWarehouseLower) return true;
     if (orderBase && targetBase && orderBase === targetBase) return true;
+    if (orderWarehouseLower.replace(/[\s\-_.]+/g, '') === targetWarehouseLower.replace(/[\s\-_.]+/g, '')) return true;
     if (orderWarehouseLower.includes(targetWarehouseLower) || targetWarehouseLower.includes(orderWarehouseLower)) return true;
     return false;
   };

@@ -35,6 +35,7 @@ const TransferOrders = () => {
   const fallbackLocations = [
     { locName: "Z-Edapally1", locCode: "144" },
     { locName: "Warehouse", locCode: "858" },
+    { locName: "Brides Berry", locCode: "155" },
     { locName: "G-Edappally", locCode: "702" },
     { locName: "HEAD OFFICE01", locCode: "759" },
     { locName: "SG-Trivandrum", locCode: "700" },
@@ -163,6 +164,7 @@ const TransferOrders = () => {
             const owBase = owLower.replace(/\s*(branch|warehouse)\s*$/i, "").trim();
             if (owLower === userWarehouseLower) return true;
             if (owBase && userBase && owBase === userBase) return true;
+            if (owLower.replace(/[\s\-_.]+/g, '') === userWarehouseLower.replace(/[\s\-_.]+/g, '')) return true;
             if (owLower.includes(userWarehouseLower) || userWarehouseLower.includes(owLower)) return true;
             const owNorm = owLower.replace(/^[a-z]{1,2}[.\-]\s*/i, "").trim();
             const uNorm = userWarehouseLower.replace(/^[a-z]{1,2}[.\-]\s*/i, "").trim();
