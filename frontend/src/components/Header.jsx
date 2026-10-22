@@ -17,6 +17,9 @@ const formatLocationName = (name) => {
     if (/^warehouse$/i.test(formatted)) {
         return "Warehouse";
     }
+    if (/^brides\s*berry$/i.test(formatted) || /^bridesberry$/i.test(formatted)) {
+        return "BridesBerry";
+    }
     if (/^g[-.\s]?mg\s*road$/i.test(formatted) || /^mg\s*road$/i.test(formatted) || /^suitorguy\s+mg\s*road$/i.test(formatted)) {
         return "MG Road";
     }

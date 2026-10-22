@@ -122,7 +122,7 @@ const Login = () => {
 
         let userObj = { ...data.user };
         if (userObj.power === 'admin') {
-          if (!['858', '718'].includes(String(userObj.locCode))) {
+          if (!['858', '155', '718'].includes(String(userObj.locCode))) {
             userObj.locCode = '858';
             userObj.username = 'Warehouse';
             userObj.storeName = 'Warehouse';

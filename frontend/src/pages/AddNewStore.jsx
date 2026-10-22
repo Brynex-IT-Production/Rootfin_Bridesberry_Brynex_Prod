@@ -29,6 +29,7 @@ const AddNewStore = () => {
         { locName: "Z-Perinthalmanna", locCode: "133" },
         { locName: "Z-Kottakkal", locCode: "122" },
         { locName: "Warehouse", locCode: "858" },
+        { locName: "BridesBerry", locCode: "155" },
         { locName: "G-Edappally", locCode: "702" },
         { locName: "HEAD OFFICE01", locCode: "759" },
         { locName: "SG-Trivandrum", locCode: "700" },

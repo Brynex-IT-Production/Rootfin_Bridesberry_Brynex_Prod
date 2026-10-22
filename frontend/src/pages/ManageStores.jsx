@@ -353,6 +353,7 @@ const ManageStores = () => {
                                         {[
                                             { locName: "Z-Edapally1", locCode: "144" },
                                             { locName: "Warehouse", locCode: "858" },
+                                            { locName: "BridesBerry", locCode: "155" },
                                             { locName: "G-Edappally", locCode: "702" },
                                             { locName: "HEAD OFFICE01", locCode: "759" },
                                             { locName: "SG-Trivandrum", locCode: "700" },

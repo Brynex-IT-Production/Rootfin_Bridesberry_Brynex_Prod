@@ -40,12 +40,15 @@ const Nav = () => {
     // Check if user has access to Sales and Inventory sections
     // Admin users always have access, regular users need to be in the allowed list
     const userEmail = currentuser?.email?.toLowerCase() || "";
+    const userLocCode = (currentuser?.locCode || "").toString().trim();
     const isAdmin = currentuser?.power === 'admin';
+    const isWarehouse = currentuser?.power === 'warehouse' || userLocCode === '858' || userLocCode === '103';
+    const isBridesBerry = userLocCode === '155' || userEmail.includes('bridesberry') || (currentuser?.username || "").toLowerCase().includes('bridesberry');
     const isClusterManager = (currentuser?.role || "").toLowerCase() === "cluster_manager";
     const isInAllowedList = salesInventoryAccessConfig.allowedEmails
         .map(email => email.toLowerCase())
         .includes(userEmail);
-    const hasSalesInventoryAccess = isAdmin || isInAllowedList;
+    const hasSalesInventoryAccess = isAdmin || isInAllowedList || isBridesBerry;
 
     const activePath = location.pathname;
 
@@ -109,14 +112,14 @@ const Nav = () => {
     const inventoryLinks = [
         { to: "/shoe-sales/items", label: "Items", Icon: List },
         // Only show these for admin and warehouse users
-        ...(currentuser.power === 'admin' || currentuser.power === 'warehouse' ? [
+        ...(currentuser?.power === 'admin' || currentuser?.power === 'warehouse' || isBridesBerry ? [
             { to: "/shoe-sales/item-groups", label: "Item Groups", Icon: Layers },
             { to: "/inventory/adjustments", label: "Inventory Adjustments", Icon: SlidersHorizontal },
         ] : []),
         { to: "/inventory/transfer-orders", label: "Transfer Orders", Icon: ArrowLeftRight },
         { to: "/inventory/store-orders", label: "Store Orders", Icon: ShoppingBasket },
         // Only show these for admin and warehouse users
-        ...(currentuser.power === 'admin' || currentuser.power === 'warehouse' ? [
+        ...(currentuser?.power === 'admin' || currentuser?.power === 'warehouse' || isBridesBerry ? [
             { to: "/inventory/reorder-alerts", label: "Reorder Alerts", Icon: AlertTriangle },
             { to: "/shoe-sales/inactive", label: "Inactive", Icon: FolderClosed }
         ] : [])
@@ -127,8 +130,8 @@ const Nav = () => {
     ];
     const isInventoryActive = inventoryLinks.some((link) => link.to === activePath) ||
                                activePath.startsWith("/shoe-sales/items") ||
-                               (currentuser.power === 'admin' || currentuser.power === 'warehouse') && activePath.startsWith("/shoe-sales/item-groups") ||
-                               (currentuser.power === 'admin' || currentuser.power === 'warehouse') && activePath.startsWith("/shoe-sales/inactive") ||
+                               (currentuser?.power === 'admin' || currentuser?.power === 'warehouse' || isBridesBerry) && activePath.startsWith("/shoe-sales/item-groups") ||
+                               (currentuser?.power === 'admin' || currentuser?.power === 'warehouse' || isBridesBerry) && activePath.startsWith("/shoe-sales/inactive") ||
                                activePath.startsWith("/inventory/store-orders");
     const isSalesActive = salesLinks.some((link) => link.to === activePath);
     const purchaseLinks = [
@@ -312,7 +315,7 @@ const Nav = () => {
                             )}
 
                             {/* Purchase */}
-                            {(currentuser.power === 'admin' || currentuser.power === 'warehouse') && (
+                            {(currentuser?.power === 'admin' || currentuser?.power === 'warehouse' || isBridesBerry) && (
                                 <div>
                                     <button onClick={() => setOpenSection(isPurchaseOpen ? null : "purchase")} className={groupButtonClasses(isPurchaseActive || isPurchaseOpen)}>
                                         <div className="flex w-full items-center gap-3">
