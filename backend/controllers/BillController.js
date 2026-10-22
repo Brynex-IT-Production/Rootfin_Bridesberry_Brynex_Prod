@@ -937,8 +937,8 @@ export const createBill = async (req, res) => {
     
     const bill = await Bill.create(billData);
 
-    // Sync item pricing back to ItemGroup and ShoeItem (only when not draft)
-    if (billData.status !== "draft" && billData.items && Array.isArray(billData.items)) {
+    // Sync item pricing back to ItemGroup and ShoeItem
+    if (billData.items && Array.isArray(billData.items)) {
       await syncItemPricesFromBill(billData.items);
     }
     
@@ -976,7 +976,7 @@ export const createBill = async (req, res) => {
       });
     }
     
-    // If status is "open" or "completed", process the bill (add stock and update vendor balance)
+    // If status is "open", process the bill (add stock and update vendor balance)
     // IMPORTANT: If bill is from Purchase Receive, stock was already added at Receive stage
     // So we should NOT add stock again - only update vendor balance
     console.log(`\n📋 BILL CREATION STOCK CHECK:`);
@@ -999,7 +999,7 @@ export const createBill = async (req, res) => {
       })));
     }
     
-    if ((billData.status === "open" || billData.status === "completed") && hasItemsWithQuantity) {
+    if ((billData.status === "open" || billData.status === "completed" || billData.status === "draft") && hasItemsWithQuantity) {
       const sourceType = billData.sourceType || "direct";
       console.log(`   ✅ Status is "${billData.status}" and items with quantity > 0 found, proceeding...`);
       console.log(`   Source type: "${sourceType}"`);
@@ -1026,33 +1026,9 @@ export const createBill = async (req, res) => {
           console.log(`📍 Admin email detected (${userId}), using warehouse: "Warehouse" (ignoring locCode and billData.warehouse)`);
         } else if (!warehouseName) {
           // If warehouse not provided and not admin, determine from locCode
-           const fallbackLocations = [
-       
-        { "locName": "Warehouse", "locCode": "858" },
-        { "locName": "G-Edappally", "locCode": "702" },
-        { "locName": "HEAD OFFICE01", "locCode": "759" },
-        { "locName": "SG-Trivandrum", "locCode": "700" },
-         { "locName": "Z-Edapally", "locCode": "144" },
-        { "locName": "Z-Edappal", "locCode": "100" },
-        { "locName": "Z-Perinthalmanna", "locCode": "133" },
-        { "locName": "Z-Kottakkal", "locCode": "122" },
-        { "locName": "G-Kottayam", "locCode": "701" },
-        { "locName": "G-Perumbavoor", "locCode": "703" },
-        { "locName": "G-Thrissur", "locCode": "704" },
-        { "locName": "G-Chavakkad", "locCode": "706" },
-        { "locName": "G-Calicut", "locCode": "712" },
-        { "locName": "G-Vadakara", "locCode": "708" },
-        { "locName": "G-Edappal", "locCode": "707" },
-        { "locName": "G-Perinthalmanna", "locCode": "709" },
-        { "locName": "G-Kottakkal", "locCode": "711" },
-        { "locName": "G-Manjeri", "locCode": "710" },
-        { "locName": "G-Palakkad", "locCode": "705" },
-        { "locName": "G-Kalpetta", "locCode": "717" },
-        { "locName": "G-Kannur", "locCode": "716" },
-        { "locName": "G-Mg Road", "locCode": "718" },
-        { "locName": "Production", "locCode": "101" },
-        { "locName": "Office", "locCode": "102" }
-    ];
+          const fallbackLocations = [
+            { "locName": "Warehouse", "locCode": "858" }
+          ];
           
           const userLocCode = billData.locCode || "";
           if (userLocCode) {
@@ -1211,11 +1187,6 @@ export const getBills = async (req, res) => {
 export const getBillById = async (req, res) => {
   try {
     const { id } = req.params;
-    
-    if (!id || !mongoose.Types.ObjectId.isValid(id)) {
-      return res.status(404).json({ message: "Invalid Bill ID format" });
-    }
-
     const bill = await Bill.findById(id);
     
     if (!bill) {
@@ -1225,38 +1196,18 @@ export const getBillById = async (req, res) => {
     const billObj = bill.toObject();
     let hasUpdates = false;
 
-    if (billObj.items && Array.isArray(billObj.items) && billObj.items.length > 0) {
-      // Collect unique itemGroupIds and itemIds for fast BATCH fetching (avoid N queries in a loop)
-      const groupIds = [...new Set(
-        billObj.items
-          .map(item => item.itemGroupId?.toString())
-          .filter(gId => gId && mongoose.Types.ObjectId.isValid(gId))
-      )];
-
-      const itemIds = [...new Set(
-        billObj.items
-          .map(item => item.itemId?.toString())
-          .filter(itId => itId && itId !== "null" && mongoose.Types.ObjectId.isValid(itId))
-      )];
-
-      const [groups, standaloneItems] = await Promise.all([
-        groupIds.length > 0 ? ItemGroup.find({ _id: { $in: groupIds } }).lean() : [],
-        itemIds.length > 0 ? ShoeItem.find({ _id: { $in: itemIds } }).lean() : [],
-      ]);
-
-      const groupMap = new Map(groups.map(g => [g._id.toString(), g]));
-      const itemMap = new Map(standaloneItems.map(it => [it._id.toString(), it]));
-
+    if (billObj.items && Array.isArray(billObj.items)) {
       for (let i = 0; i < billObj.items.length; i++) {
         const item = billObj.items[i];
         const itemId = item.itemId?.toString();
         const itemGroupId = item.itemGroupId?.toString();
         let targetSku = item.sku || item.itemSku || "";
+
         let resolved = false;
 
-        // 1. Fast in-memory lookup for group item
-        if (itemGroupId && groupMap.has(itemGroupId)) {
-          const group = groupMap.get(itemGroupId);
+        // 1. Check group items first if itemGroupId is set
+        if (itemGroupId) {
+          const group = await ItemGroup.findById(itemGroupId);
           if (group && Array.isArray(group.items)) {
             const found = group.items.find(gi => 
               (itemId && (gi._id?.toString() === itemId || gi.id?.toString() === itemId)) ||
@@ -1275,9 +1226,9 @@ export const getBillById = async (req, res) => {
           }
         }
 
-        // 2. Fast in-memory lookup for standalone item
-        if (!resolved && itemId && itemMap.has(itemId)) {
-          const shoeItem = itemMap.get(itemId);
+        // 2. Check standalone ShoeItem
+        if (!resolved && itemId && itemId !== "null" && mongoose.Types.ObjectId.isValid(itemId)) {
+          const shoeItem = await ShoeItem.findById(itemId);
           if (shoeItem) {
             if (shoeItem.sku) targetSku = shoeItem.sku;
             if (shoeItem.itemName && !billObj.items[i].itemName) billObj.items[i].itemName = shoeItem.itemName;
@@ -1304,7 +1255,7 @@ export const getBillById = async (req, res) => {
     }
 
     if (hasUpdates) {
-      bill.save().catch(err => console.warn("Could not sync bill SKUs in getBillById:", err));
+      await bill.save().catch(err => console.warn("Could not sync bill SKUs in getBillById:", err));
     }
     
     res.status(200).json(billObj);
@@ -1347,32 +1298,8 @@ export const updateBill = async (req, res) => {
     } else if (!warehouseName) {
       // If warehouse not provided and not admin, determine from locCode
        const fallbackLocations = [
-       
-        { "locName": "Warehouse", "locCode": "858" },
-        { "locName": "G-Edappally", "locCode": "702" },
-        { "locName": "HEAD OFFICE01", "locCode": "759" },
-        { "locName": "SG-Trivandrum", "locCode": "700" },
-         { "locName": "Z-Edapally", "locCode": "144" },
-        { "locName": "Z-Edappal", "locCode": "100" },
-        { "locName": "Z-Perinthalmanna", "locCode": "133" },
-        { "locName": "Z-Kottakkal", "locCode": "122" },
-        { "locName": "G-Kottayam", "locCode": "701" },
-        { "locName": "G-Perumbavoor", "locCode": "703" },
-        { "locName": "G-Thrissur", "locCode": "704" },
-        { "locName": "G-Chavakkad", "locCode": "706" },
-        { "locName": "G-Calicut", "locCode": "712" },
-        { "locName": "G-Vadakara", "locCode": "708" },
-        { "locName": "G-Edappal", "locCode": "707" },
-        { "locName": "G-Perinthalmanna", "locCode": "709" },
-        { "locName": "G-Kottakkal", "locCode": "711" },
-        { "locName": "G-Manjeri", "locCode": "710" },
-        { "locName": "G-Palakkad", "locCode": "705" },
-        { "locName": "G-Kalpetta", "locCode": "717" },
-        { "locName": "G-Kannur", "locCode": "716" },
-        { "locName": "G-Mg Road", "locCode": "718" },
-        { "locName": "Production", "locCode": "101" },
-        { "locName": "Office", "locCode": "102" }
-    ];
+        { "locName": "Warehouse", "locCode": "858" }
+      ];
       
       const userLocCode = billData.locCode || existingBill.locCode || "";
       if (userLocCode) {
@@ -1695,8 +1622,8 @@ export const updateBill = async (req, res) => {
       return res.status(404).json({ message: "Bill not found" });
     }
 
-    // Sync item pricing back to ItemGroup and ShoeItem (only when not draft)
-    if (newStatus !== "draft" && billData.items && Array.isArray(billData.items)) {
+    // Sync item pricing back to ItemGroup and ShoeItem
+    if (billData.items && Array.isArray(billData.items)) {
       await syncItemPricesFromBill(billData.items);
     }
     

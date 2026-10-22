@@ -3,6 +3,7 @@ import Rootments from '../assets/Rootments.jpg';
 import { useState, useEffect } from "react";
 import baseUrl from '../api/api';
 import salesInventoryAccessConfig from '../config/salesInventoryAccess.json';
+import { getActiveStores, fetchActiveStores, FALLBACK_STORES } from "../utils/storeService.js";
 
 const API_URL = baseUrl?.baseUrl?.replace(/\/$/, "") || "http://localhost:7000";
 
@@ -27,13 +28,7 @@ const formatLocationName = (name) => {
 };
 
 const Header = (prop) => {
-    // Only Warehouse and MG Road
-    const fallbackLocations = [
-        { "locName": "Warehouse", "locCode": "858" },
-        { "locName": "MG Road", "locCode": "718" },
-    ];
-
-    const [AllLoation, setAllLoation] = useState(fallbackLocations);
+    const [AllLoation, setAllLoation] = useState(() => getActiveStores());
 
     const [Value, setValue] = useState({ locCode: '', locName: '' });
 
@@ -44,19 +39,6 @@ const Header = (prop) => {
     const getInitialUser = () => {
         try {
             const storedUser = JSON.parse(localStorage.getItem("rootfinuser"));
-            if (!storedUser) return {};
-            if (storedUser.power === 'admin') {
-                const isValid = fallbackLocations.some(loc => loc.locCode === storedUser.locCode);
-                if (!isValid) {
-                    const updated = {
-                        ...storedUser,
-                        locCode: fallbackLocations[0].locCode,
-                        username: fallbackLocations[0].locName
-                    };
-                    localStorage.setItem("rootfinuser", JSON.stringify(updated));
-                    return updated;
-                }
-            }
             return storedUser || {};
         } catch (error) {
             return {};
@@ -69,29 +51,24 @@ const Header = (prop) => {
         try {
             const storedUser = JSON.parse(localStorage.getItem("rootfinuser"));
             if (storedUser) {
-                const matchedLoc = locations.find(loc => loc.locCode === storedUser.locCode);
-                if (matchedLoc) {
-                    if (storedUser.username !== matchedLoc.locName) {
-                        const updatedUser = { ...storedUser, username: matchedLoc.locName };
-                        localStorage.setItem("rootfinuser", JSON.stringify(updatedUser));
-                        setCurrentUser(updatedUser);
-                    } else {
-                        setCurrentUser(storedUser);
-                    }
-                    setSelectedValue(matchedLoc.locCode);
-                } else if (storedUser.power === 'admin' && locations.length > 0) {
-                    const defaultLoc = locations.find(loc => loc.locCode === "858") || locations[0];
+                const foundLoc = locations.find(loc => loc.locCode === storedUser.locCode);
+                const activeLoc = foundLoc || locations[0];
+                if (activeLoc) {
                     const updatedUser = {
                         ...storedUser,
-                        locCode: defaultLoc.locCode,
-                        username: defaultLoc.locName
+                        locCode: activeLoc.locCode,
+                        username: activeLoc.locName
                     };
-                    localStorage.setItem("rootfinuser", JSON.stringify(updatedUser));
+                    if (!foundLoc && locations.length > 0) {
+                        try {
+                            localStorage.setItem("rootfinuser", JSON.stringify(updatedUser));
+                        } catch (e) {}
+                    }
                     setCurrentUser(updatedUser);
-                    setSelectedValue(defaultLoc.locCode);
+                    setSelectedValue(activeLoc.locCode);
                 } else {
                     setCurrentUser(storedUser);
-                    setSelectedValue(storedUser.locCode || "");
+                    setSelectedValue(storedUser.locCode);
                 }
             }
         } catch (error) {
@@ -100,57 +77,24 @@ const Header = (prop) => {
     };
 
     useEffect(() => {
-        // Fetch store names from backend and filter to Warehouse and MG Road only
-        const fetchStores = async () => {
-            try {
-                const response = await fetch(`${API_URL}/api/stores`);
-                if (response.ok) {
-                    const data = await response.json();
-                    if (data.stores && Array.isArray(data.stores)) {
-                        const fallbackMap = new Map(fallbackLocations.map(f => [f.locCode, f.locName]));
-                        
-                        const isAllowed = (locCode, locName) => {
-                            const code = (locCode || "").toString();
-                            const name = (locName || "").toLowerCase();
-                            return code === "858" || code === "718" || name.includes("warehouse") || name.includes("mg road") || name.includes("mgroad");
-                        };
-
-                        const backendStores = data.stores
-                            .filter(store => isAllowed(store.locCode, store.name))
-                            .map(store => ({
-                                locName: fallbackMap.get(store.locCode) || store.name,
-                                locCode: store.locCode
-                            }));
-                        
-                        const mergedLocations = [...backendStores];
-                        const backendCodes = new Set(backendStores.map(s => s.locCode));
-                        
-                        fallbackLocations.forEach(fallback => {
-                            if (!backendCodes.has(fallback.locCode)) {
-                                mergedLocations.push(fallback);
-                            }
-                        });
-                        
-                        const sortedLocations = mergedLocations.sort((a, b) => 
-                            a.locName.localeCompare(b.locName)
-                        );
-                        setAllLoation(sortedLocations);
-                        syncUserFromStorage(sortedLocations);
-                        return;
-                    }
-                }
-            } catch (error) {
-                console.error("Error fetching stores:", error);
+        const load = async () => {
+            const locations = await fetchActiveStores();
+            if (locations && locations.length > 0) {
+                setAllLoation(locations);
+                syncUserFromStorage(locations);
             }
-            
-            const sortedLocations = [...fallbackLocations].sort((a, b) => 
-                a.locName.localeCompare(b.locName)
-            );
-            setAllLoation(sortedLocations);
-            syncUserFromStorage(sortedLocations);
+        };
+        load();
+
+        const handleStoresUpdated = (e) => {
+            if (e.detail && Array.isArray(e.detail)) {
+                setAllLoation(e.detail);
+                syncUserFromStorage(e.detail);
+            }
         };
 
-        fetchStores();
+        window.addEventListener("rootfin-stores-updated", handleStoresUpdated);
+        return () => window.removeEventListener("rootfin-stores-updated", handleStoresUpdated);
     }, []);
 
     // Additional useEffect to periodically sync user from localStorage
