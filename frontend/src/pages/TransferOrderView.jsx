@@ -542,29 +542,37 @@ const TransferOrderView = () => {
         const successful = data.stockUpdates.filter(u => u.status === "success");
         const failed = data.stockUpdates.filter(u => u.status !== "success");
         
-        let message = "Transfer order received successfully!\n\n";
-        message += `Stock updated in ${transferOrder.destinationWarehouse}:\n\n`;
-        successful.forEach(update => {
-          const stockBefore = update.stockBefore !== undefined ? update.stockBefore : null;
-          const stockAfter = update.stockAfter !== undefined ? update.stockAfter : null;
-          const received = update.quantity || 0;
-          
-          if (stockBefore !== null && stockAfter !== null && stockBefore !== undefined && stockAfter !== undefined) {
-            message += `✅ ${update.itemName}:\n`;
-            message += `   Previous stock: ${stockBefore}\n`;
-            message += `   Received: +${received}\n`;
-            message += `   New total: ${stockAfter}\n\n`;
-          } else {
-            message += `✅ ${update.itemName}: +${received} units\n`;
-          }
-        });
+        let message = `Transfer order received successfully!\n\n${successful.length} items updated in ${transferOrder.destinationWarehouse}:\n\n`;
+        
+        // Show individual breakdown if <= 5 items, or summary for large orders (e.g. 150 items)
+        if (successful.length <= 5) {
+          successful.forEach(update => {
+            const stockBefore = update.stockBefore !== undefined ? update.stockBefore : null;
+            const stockAfter = update.stockAfter !== undefined ? update.stockAfter : null;
+            const received = update.quantity || 0;
+            
+            if (stockBefore !== null && stockAfter !== null && stockBefore !== undefined && stockAfter !== undefined) {
+              message += `✅ ${update.itemName}:\n`;
+              message += `   Previous stock: ${stockBefore}\n`;
+              message += `   Received: +${received}\n`;
+              message += `   New total: ${stockAfter}\n\n`;
+            } else {
+              message += `✅ ${update.itemName}: +${received} units\n`;
+            }
+          });
+        } else {
+          message += `✅ Total ${successful.length} products added to stock.\n`;
+        }
         
         if (failed.length > 0) {
-          message += `\n⚠️ Failed to update:\n`;
-          failed.forEach(update => {
+          message += `\n⚠️ Failed to update (${failed.length} items):\n`;
+          failed.slice(0, 5).forEach(update => {
             const errorMsg = update.error || update.message || "Unknown error";
             message += `❌ ${update.itemName}: ${errorMsg}\n`;
           });
+          if (failed.length > 5) {
+            message += `...and ${failed.length - 5} more items.\n`;
+          }
         }
         
         message += `\n📦 Items are now available in your Items page.`;
@@ -595,6 +603,29 @@ const TransferOrderView = () => {
       }));
     } catch (error) {
       console.error("Error receiving transfer order:", error);
+      
+      // Fallback check: if network timed out or failed to fetch, check if the server completed it
+      try {
+        const checkResponse = await fetch(`${API_URL}/api/inventory/transfer-orders/${id}`);
+        if (checkResponse.ok) {
+          const checkData = await checkResponse.json();
+          if (checkData.status === "transferred") {
+            setTransferOrder(checkData);
+            if (showScanner) {
+              await stopScanner();
+            }
+            resetScannedItems();
+            window.dispatchEvent(new CustomEvent('transferOrderReceived', { 
+              detail: { destinationWarehouse: checkData.destinationWarehouse } 
+            }));
+            alert(`Transfer order was received and updated successfully on the server!\n\n📦 Items are now available in ${checkData.destinationWarehouse}.`);
+            return;
+          }
+        }
+      } catch (checkErr) {
+        console.warn("Fallback order status check failed:", checkErr);
+      }
+      
       alert(`Failed to receive transfer order: ${error.message}`);
     } finally {
       setReceiving(false);
