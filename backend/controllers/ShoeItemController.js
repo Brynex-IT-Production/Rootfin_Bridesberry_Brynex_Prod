@@ -568,6 +568,8 @@ export const getShoeItems = async (req, res) => {
             size: resolvedSize,
             costPrice: item.costPrice || 0,
             sellingPrice: item.sellingPrice || 0,
+            mrp: item.mrp !== undefined && item.mrp !== null && item.mrp !== "" ? item.mrp : (item.sellingPrice || 0),
+            itemCode: item.itemCode || group.itemCode || "",
             upc: item.upc || "",
             hsnCode: item.hsnCode || "",
             isbn: item.isbn || "",

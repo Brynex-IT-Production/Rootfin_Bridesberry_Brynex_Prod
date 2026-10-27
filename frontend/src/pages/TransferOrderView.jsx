@@ -1,6 +1,19 @@
 import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
-import { ArrowLeft, Edit, Printer, Download, PackageCheck, Scan, X, CheckCircle } from "lucide-react";
+import { createPortal } from "react-dom";
+import JsBarcode from "jsbarcode";
+import {
+  ArrowLeft,
+  Edit,
+  Printer,
+  PackageCheck,
+  Scan,
+  X,
+  CheckCircle,
+  Barcode,
+  Loader2,
+  Check
+} from "lucide-react";
 import { Html5Qrcode } from "html5-qrcode";
 import Head from "../components/Head";
 import baseUrl from "../api/api";
@@ -508,7 +521,438 @@ const TransferOrderView = () => {
       window.print();
     }
   };
-  
+
+  // ─── BARCODE PRINTING STATE ────────────────────────────────────
+  const [catalogItems, setCatalogItems] = useState([]);
+  const [tagPrintToast, setTagPrintToast] = useState(null);
+
+  const showTagToast = (message, type = "info") => {
+    setTagPrintToast({ message, type });
+    setTimeout(() => setTagPrintToast(null), 3000);
+  };
+
+  // Fetch full shoe sales / jewelry items catalog to enrich transfer order items with accurate MRP, itemCode, etc.
+  useEffect(() => {
+    let isMounted = true;
+    const fetchCatalog = async () => {
+      try {
+        const response = await fetch(`${API_URL}/api/shoe-sales/items?page=1&limit=10000`);
+        if (response.ok && isMounted) {
+          const data = await response.json();
+          const itemsList = Array.isArray(data) ? data : (data.items || data.data || []);
+          setCatalogItems(itemsList);
+        }
+      } catch (err) {
+        console.error("Error loading catalog items for transfer order:", err);
+      }
+    };
+    fetchCatalog();
+    return () => {
+      isMounted = false;
+    };
+  }, [API_URL]);
+
+  // Helper to generate guaranteed non-repeating 10-digit sequential unique product code / SKU
+  const getNextUniqueProductCode = () => {
+    const STORAGE_KEY = "brynex_last_unique_code_seq";
+    let lastCode = parseInt(localStorage.getItem(STORAGE_KEY), 10);
+    if (isNaN(lastCode) || lastCode < 1000015000) {
+      lastCode = 1000015982;
+    }
+    const nextCode = lastCode + 1;
+    localStorage.setItem(STORAGE_KEY, nextCode.toString());
+    return nextCode.toString();
+  };
+
+  // Get sequential piece codes for an item with quantity >= 1
+  const getPieceCodesForItem = (item) => {
+    const qty = Math.max(1, Math.round(parseFloat(item.quantity) || 1));
+    const baseCodeStr = String(item.itemSku || item.sku || "").trim();
+    if (qty === 1) {
+      return [baseCodeStr || getNextUniqueProductCode()];
+    }
+    const codes = [];
+    const isNumericBase = /^\d+$/.test(baseCodeStr);
+    if (isNumericBase) {
+      const baseNum = parseInt(baseCodeStr, 10);
+      for (let i = 0; i < qty; i++) {
+        codes.push(String(baseNum + i));
+      }
+    } else {
+      for (let i = 0; i < qty; i++) {
+        codes.push(baseCodeStr ? `${baseCodeStr}-${i + 1}` : getNextUniqueProductCode());
+      }
+    }
+    return codes;
+  };
+
+  // Helper to generate crisp inline SVG Barcode (Synchronous, 0ms lag, no blank images)
+  const generateBarcodeSvg = (text) => {
+    if (!text) return "";
+    try {
+      const svgNode = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      JsBarcode(svgNode, String(text).trim(), {
+        format: "CODE128",
+        width: 1.8,
+        height: 38,
+        displayValue: false,
+        margin: 0,
+        background: "transparent",
+        lineColor: "#000000"
+      });
+      return svgNode.outerHTML;
+    } catch (e) {
+      console.error("Barcode SVG error:", e);
+      return `<div style="font-family: monospace; font-size: 10px; font-weight: bold;">${text}</div>`;
+    }
+  };
+
+
+  // Generate standalone, clean and isolated HTML document for thermal printing (92mm x 12mm Dual-Wing - identical to Bills.jsx)
+  const generateTagPrintHtml = (tagItems) => {
+    const pagesHtml = tagItems
+      .map(
+        (tag) => `
+      <div class="tag-page">
+        <div class="tag-left">
+          ${tag.storeName ? `<div class="store-title">${tag.storeName}</div>` : ""}
+          <div class="code-wrap">
+            ${tag.isQr && tag.imgData ? `<img src="${tag.imgData}" class="qr-img" alt="QR Code" />` : (tag.barcodeSvg || "")}
+          </div>
+          <div class="serial-code">${tag.unitCode}</div>
+        </div>
+        <div class="tag-right">
+          <div class="sku-code">${tag.currentDNo || tag.unitCode}</div>
+          <div class="item-title">${tag.itemName || "Jewelry Item"}</div>
+          <div class="price-tag">Rs. ${tag.formattedPrice}</div>
+        </div>
+      </div>
+    `
+      )
+      .join("");
+
+    return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Print Jewelry Tags - Transfer Order</title>
+  <style>
+    @media print {
+      @page {
+        size: 3.62in 0.47in;
+        margin: 0;
+      }
+      body {
+        margin: 0;
+        padding: 0;
+      }
+      .tag-page {
+        border: none !important;
+      }
+    }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: Arial, sans-serif;
+      background: white;
+      width: 3.62in;
+    }
+    .tag-page {
+      width: 3.62in;
+      height: 0.47in;
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      justify-content: flex-start;
+      padding: 0.01in;
+      page-break-after: always;
+      break-after: page;
+      page-break-inside: avoid;
+      break-inside: avoid;
+      overflow: hidden;
+      background: #ffffff;
+      border: 1px solid #ccc;
+      gap: 0px;
+    }
+    .tag-page:last-child {
+      page-break-after: auto;
+      break-after: auto;
+    }
+    .tag-left {
+      width: 1.3in;
+      height: 0.43in;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: flex-start;
+      text-align: center;
+      overflow: visible;
+      padding: 0;
+      padding-left: 0;
+      margin-left: -0.15in;
+      margin-top: -0.05in;
+      flex-shrink: 0;
+      gap: 0;
+    }
+    .tag-right {
+      width: 2.2in;
+      height: 0.43in;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      justify-content: flex-start;
+      text-align: left;
+      padding-left: 0.02in;
+      margin-top: -0.05in;
+      margin-left: -0.1in;
+      overflow: visible;
+      flex-shrink: 0;
+      gap: 0.05in;
+    }
+    .store-title {
+      font-size: 6.5pt;
+      font-weight: 600;
+      line-height: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 100%;
+      color: #000000;
+    }
+    .code-wrap {
+      width: 100%;
+      height: 0.2in;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      margin-top: 0.09in;
+    }
+    .code-wrap svg {
+      width: 100%;
+      height: 0.19in;
+      display: block;
+    }
+    .qr-img {
+      width: 0.19in;
+      height: 0.19in;
+      object-fit: contain;
+      display: block;
+      margin: 0 auto;
+    }
+    .serial-code {
+      font-size: 7.5pt;
+      font-weight: 700;
+      font-family: monospace, "Courier New", Courier, monospace;
+      line-height: 1;
+      color: #000000;
+      letter-spacing: 0.2px;
+    }
+    .sku-code {
+      font-size: 8pt;
+      font-weight: 700;
+      line-height: 1.1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 100%;
+      color: #000000;
+    }
+    .item-title {
+      font-size: 7pt;
+      font-weight: 700;
+      line-height: 1.1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 100%;
+      color: #000000;
+    }
+    .price-tag {
+      font-size: 8pt;
+      font-weight: 700;
+      line-height: 1.1;
+      white-space: nowrap;
+      color: #000000;
+    }
+  </style>
+</head>
+<body>
+  ${pagesHtml}
+</body>
+</html>`;
+  };
+
+  // Dedicated Print Pipeline using Isolated Printable Iframe
+  const printThermalHtml = (htmlContent) => {
+    const oldFrame = document.getElementById("thermal-print-frame");
+    if (oldFrame) {
+      try {
+        oldFrame.parentNode.removeChild(oldFrame);
+      } catch (e) {}
+    }
+
+    const iframe = document.createElement("iframe");
+    iframe.id = "thermal-print-frame";
+    iframe.style.position = "fixed";
+    iframe.style.top = "-9999px";
+    iframe.style.left = "-9999px";
+    iframe.style.width = "3.62in";
+    iframe.style.height = "0.47in";
+    iframe.style.border = "none";
+    iframe.style.zIndex = "-9999";
+
+    document.body.appendChild(iframe);
+
+    const doPrint = async () => {
+      try {
+        const doc = iframe.contentWindow.document;
+
+        // Wait for every image in the printable doc to actually decode
+        const imgs = Array.from(doc.images);
+        await Promise.all(
+          imgs.map((img) =>
+            img.complete
+              ? (img.decode ? img.decode().catch(() => {}) : Promise.resolve())
+              : new Promise((resolve) => {
+                  img.onload = () => (img.decode ? img.decode().then(resolve).catch(resolve) : resolve());
+                  img.onerror = resolve;
+                })
+          )
+        );
+
+        // Give layout one more frame to settle
+        await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+
+        iframe.contentWindow.focus();
+        iframe.contentWindow.print();
+      } catch (err) {
+        console.error("Iframe print error, falling back to popup:", err);
+        const w = window.open("", "_blank", "width=800,height=600");
+        if (w) {
+          w.document.write(htmlContent);
+          w.document.close();
+          w.focus();
+          setTimeout(() => w.print(), 350);
+        }
+      }
+    };
+
+    iframe.onload = doPrint;
+    iframe.srcdoc = htmlContent;
+  };
+
+  // Build tag items list for printing (100% matched to Bills.jsx barcode layout)
+  const buildTagItemsForItems = (itemsList) => {
+    const tagItems = [];
+
+    for (const item of itemsList) {
+      const itemSkuNorm = String(item.itemSku || "").trim().toLowerCase();
+      const itemIdNorm = String(item.itemId || "").trim().toLowerCase();
+      const itemNameNorm = String(item.itemName || "").trim().toLowerCase();
+
+      // Find in catalogItems
+      const matched = catalogItems.find((c) => {
+        const cSku = String(c.sku || "").trim().toLowerCase();
+        const cId = String(c._id || c.id || "").trim().toLowerCase();
+        const cName = String(c.itemName || c.name || "").trim().toLowerCase();
+        if (itemSkuNorm && cSku && itemSkuNorm === cSku) return true;
+        if (itemIdNorm && cId && itemIdNorm === cId) return true;
+        if (itemNameNorm && cName && itemNameNorm === cName) return true;
+        return false;
+      });
+
+      const resolvedMrp =
+        matched?.mrp !== undefined && matched?.mrp !== null && matched?.mrp !== ""
+          ? parseFloat(matched.mrp)
+          : (matched?.sellingPrice !== undefined && matched?.sellingPrice !== null && matched?.sellingPrice !== ""
+              ? parseFloat(matched.sellingPrice)
+              : (parseFloat(item.mrp || item.rate || 0) || 0));
+
+      const uiItemCode = (
+        matched?.itemCode ||
+        matched?.designNo ||
+        matched?.dNo ||
+        (matched?.sku && !/^\d{10}$/.test(String(matched.sku).trim()) ? matched.sku : "") ||
+        item.itemCode ||
+        item.designNo ||
+        ""
+      ).trim();
+
+      const itemName = (item.itemName || matched?.itemName || "Jewelry Item").trim();
+      const formattedPrice = resolvedMrp % 1 === 0 ? resolvedMrp.toFixed(0) : resolvedMrp.toFixed(2);
+      const qty = Math.max(1, Math.round(parseFloat(item.quantity) || 1));
+      const pieceCodes = getPieceCodesForItem(item);
+
+      for (let i = 0; i < qty; i++) {
+        const unitCode = pieceCodes[i] || item.itemSku || getNextUniqueProductCode();
+        const currentDNo = uiItemCode || unitCode;
+        const barcodeSvg = generateBarcodeSvg(unitCode);
+
+        tagItems.push({
+          unitCode,
+          currentDNo,
+          itemName,
+          storeName: "", // In Bills page, storeName is "" so there's no store header, matching Image 1
+          formattedPrice,
+          barcodeSvg,
+          isQr: false
+        });
+      }
+    }
+
+    return tagItems;
+  };
+
+  // Direct print barcode for all items in this transfer order (like in Bills page)
+  const handlePrintAllBarcodes = () => {
+    if (!transferOrder || !transferOrder.items || transferOrder.items.length === 0) {
+      alert("No items in this transfer order to print.");
+      return;
+    }
+
+    const tagItems = buildTagItemsForItems(transferOrder.items);
+    if (tagItems.length === 0) {
+      alert("No items found to generate barcodes.");
+      return;
+    }
+
+    showTagToast(`Opening print dialog for ${tagItems.length} tag(s)...`, "loading");
+    const htmlContent = generateTagPrintHtml(tagItems);
+    printThermalHtml(htmlContent);
+  };
+
+  // Direct print barcode for a single item row (like in Bills page)
+  const handlePrintSingleItemBarcode = (item) => {
+    if (!item) return;
+
+    const tagItems = buildTagItemsForItems([item]);
+    if (tagItems.length === 0) {
+      alert("Could not generate barcode for this item.");
+      return;
+    }
+
+    const qty = Math.max(1, Math.round(parseFloat(item.quantity) || 1));
+    showTagToast(`Opening print dialog for ${qty} tag(s)...`, "loading");
+    const htmlContent = generateTagPrintHtml(tagItems);
+    printThermalHtml(htmlContent);
+  };
+
+
+
+
+
+
+
+
+
   const handleReceive = async () => {
     if (!canReceive()) {
       alert("You can only receive transfer orders that are in transit and destined to your warehouse.");
@@ -687,6 +1131,15 @@ const TransferOrderView = () => {
             <Printer size={16} />
             PDF/Print
           </button>
+          <button
+            type="button"
+            onClick={handlePrintAllBarcodes}
+            className="inline-flex items-center gap-2 rounded-md border border-purple-200 bg-purple-50 px-3.5 py-1.5 text-sm font-semibold text-purple-700 hover:bg-purple-100 hover:border-purple-300 transition-colors shadow-xs cursor-pointer"
+            title="Print barcode labels directly for all items (like in Bills page)"
+          >
+            <Barcode size={16} className="text-purple-600" />
+            Print Barcode
+          </button>
           {transferOrder?.status === "in_transit" && isDestinationWarehouse() && (
             <>
               {!showScanner ? (
@@ -849,6 +1302,7 @@ const TransferOrderView = () => {
                     <th className="border border-[#d1d5db] px-4 py-3 text-left text-xs font-semibold text-[#374151]">Item & Description</th>
                     <th className="border border-[#d1d5db] px-4 py-3 text-left text-xs font-semibold text-[#374151]">HSN/SAC</th>
                     <th className="border border-[#d1d5db] px-4 py-3 text-right text-xs font-semibold text-[#374151]">Qty</th>
+                    <th className="border border-[#d1d5db] px-3 py-3 text-center text-xs font-semibold text-[#374151] print:hidden" data-html2canvas-ignore="true">Print Code</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -866,11 +1320,22 @@ const TransferOrderView = () => {
                         <td className="border border-[#d1d5db] px-4 py-3 text-sm text-right text-[#111827] font-medium">
                           {parseFloat(item.quantity || 0).toFixed(2)} pcs
                         </td>
+                        <td className="border border-[#d1d5db] px-3 py-2 text-center text-sm print:hidden" data-html2canvas-ignore="true">
+                          <button
+                            type="button"
+                            onClick={() => handlePrintSingleItemBarcode(item)}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-purple-700 bg-purple-50 hover:bg-purple-100 rounded border border-purple-200 transition-colors shadow-2xs cursor-pointer"
+                            title={`Print barcode directly for ${item.itemName || "item"}`}
+                          >
+                            <Barcode size={13} className="text-purple-600" />
+                            <span>Print</span>
+                          </button>
+                        </td>
                       </tr>
                     ))
                   ) : (
                     <tr>
-                      <td colSpan="4" className="border border-[#d1d5db] px-4 py-8 text-center text-sm text-[#6b7280]">
+                      <td colSpan="5" className="border border-[#d1d5db] px-4 py-8 text-center text-sm text-[#6b7280]">
                         No items found
                       </td>
                     </tr>
@@ -884,6 +1349,7 @@ const TransferOrderView = () => {
                     <td className="border border-[#d1d5db] px-4 py-3 text-right text-sm font-bold text-[#111827]">
                       {totalQuantity.toFixed(2)}
                     </td>
+                    <td className="border border-[#d1d5db] print:hidden" data-html2canvas-ignore="true"></td>
                   </tr>
                 </tfoot>
               </table>
@@ -1166,6 +1632,27 @@ const TransferOrderView = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Non-intrusive Zero-Touch Tag Print Toast Notification */}
+      {tagPrintToast && createPortal(
+        <div className="fixed bottom-6 right-6 z-50 animate-in fade-in slide-in-from-bottom-3 duration-150 pointer-events-none">
+          <div className={`flex items-center gap-2.5 px-4 py-2.5 rounded-xl shadow-2xl border text-xs font-semibold backdrop-blur-md ${
+            tagPrintToast.type === "success"
+              ? "bg-emerald-950/90 text-emerald-100 border-emerald-500/40"
+              : tagPrintToast.type === "error"
+              ? "bg-rose-950/90 text-rose-100 border-rose-500/40"
+              : tagPrintToast.type === "loading"
+              ? "bg-indigo-950/90 text-indigo-100 border-indigo-500/40"
+              : "bg-slate-900/90 text-white border-slate-700"
+          }`}>
+            {tagPrintToast.type === "loading" && <Loader2 size={16} className="animate-spin text-emerald-400" />}
+            {tagPrintToast.type === "success" && <Check size={16} className="text-emerald-400" />}
+            {tagPrintToast.type === "error" && <X size={16} className="text-rose-400" />}
+            <span>{tagPrintToast.message}</span>
+          </div>
+        </div>,
+        document.body
       )}
     </div>
   );
