@@ -849,32 +849,111 @@ const TransferOrderView = () => {
     iframe.srcdoc = htmlContent;
   };
 
+  // Helper to ensure catalog items are loaded on demand for the items being printed
+  const getCatalogForItems = async (itemsToPrint) => {
+    let currentCatalog = Array.isArray(catalogItems) ? [...catalogItems] : [];
+
+    // If catalog is empty, fetch the catalog immediately
+    if (currentCatalog.length === 0) {
+      try {
+        const response = await fetch(`${API_URL}/api/shoe-sales/items?page=1&limit=10000`);
+        if (response.ok) {
+          const data = await response.json();
+          const itemsList = Array.isArray(data) ? data : (data.items || data.data || []);
+          if (itemsList.length > 0) {
+            currentCatalog = itemsList;
+            setCatalogItems(itemsList);
+          }
+        }
+      } catch (err) {
+        console.error("Error loading catalog items on demand:", err);
+      }
+    }
+
+    // For any item in itemsToPrint that is still not matched in currentCatalog, fetch directly
+    const itemsNeedingLookup = (itemsToPrint || []).filter(item => {
+      const itemSkuNorm = String(item.itemSku || "").trim().toLowerCase();
+      const itemIdNorm = String(item.itemId || "").trim().toLowerCase();
+      return !currentCatalog.some(c => {
+        const cSku = String(c.sku || "").trim().toLowerCase();
+        const cId = String(c._id || c.id || "").trim().toLowerCase();
+        if (itemSkuNorm && cSku && itemSkuNorm === cSku) return true;
+        if (itemIdNorm && cId && itemIdNorm === cId) return true;
+        return false;
+      });
+    });
+
+    if (itemsNeedingLookup.length > 0) {
+      const directFetches = await Promise.all(
+        itemsNeedingLookup.map(async (m) => {
+          try {
+            if (m.itemId) {
+              const res = await fetch(`${API_URL}/api/shoe-sales/items/${m.itemId}`);
+              if (res.ok) return await res.json();
+            }
+            if (m.itemSku) {
+              const res = await fetch(`${API_URL}/api/shoe-sales/items?search=${encodeURIComponent(m.itemSku)}`);
+              if (res.ok) {
+                const data = await res.json();
+                const list = Array.isArray(data) ? data : (data.items || data.data || []);
+                const exactSku = list.find(it => String(it.sku || "").trim().toLowerCase() === String(m.itemSku || "").trim().toLowerCase());
+                if (exactSku) return exactSku;
+                if (list.length > 0) return list[0];
+              }
+            }
+          } catch (e) {
+            console.error("Error fetching single item detail for print:", e);
+          }
+          return null;
+        })
+      );
+
+      const validDirect = directFetches.filter(Boolean);
+      if (validDirect.length > 0) {
+        currentCatalog = [...currentCatalog, ...validDirect];
+        setCatalogItems(currentCatalog);
+      }
+    }
+
+    return currentCatalog;
+  };
+
   // Build tag items list for printing (100% matched to Bills.jsx barcode layout)
-  const buildTagItemsForItems = (itemsList) => {
+  const buildTagItemsForItems = (itemsList, activeCatalog = catalogItems) => {
     const tagItems = [];
+    const catalogSource = Array.isArray(activeCatalog) && activeCatalog.length > 0 ? activeCatalog : catalogItems;
 
     for (const item of itemsList) {
       const itemSkuNorm = String(item.itemSku || "").trim().toLowerCase();
       const itemIdNorm = String(item.itemId || "").trim().toLowerCase();
       const itemNameNorm = String(item.itemName || "").trim().toLowerCase();
 
-      // Find in catalogItems
-      const matched = catalogItems.find((c) => {
-        const cSku = String(c.sku || "").trim().toLowerCase();
-        const cId = String(c._id || c.id || "").trim().toLowerCase();
-        const cName = String(c.itemName || c.name || "").trim().toLowerCase();
-        if (itemSkuNorm && cSku && itemSkuNorm === cSku) return true;
-        if (itemIdNorm && cId && itemIdNorm === cId) return true;
-        if (itemNameNorm && cName && itemNameNorm === cName) return true;
-        return false;
-      });
+      // Find in catalog items: ALWAYS match by unique SKU or ID first!
+      const matched =
+        (catalogSource || []).find((c) => {
+          const cSku = String(c.sku || "").trim().toLowerCase();
+          const cId = String(c._id || c.id || "").trim().toLowerCase();
+          if (itemSkuNorm && cSku && itemSkuNorm === cSku) return true;
+          if (itemIdNorm && cId && itemIdNorm === cId) return true;
+          return false;
+        }) ||
+        (!itemSkuNorm && !itemIdNorm
+          ? (catalogSource || []).find((c) => {
+              const cName = String(c.itemName || c.name || "").trim().toLowerCase();
+              return itemNameNorm && cName && itemNameNorm === cName;
+            })
+          : null);
 
-      const resolvedMrp =
-        matched?.mrp !== undefined && matched?.mrp !== null && matched?.mrp !== ""
-          ? parseFloat(matched.mrp)
-          : (matched?.sellingPrice !== undefined && matched?.sellingPrice !== null && matched?.sellingPrice !== ""
-              ? parseFloat(matched.sellingPrice)
-              : (parseFloat(item.mrp || item.rate || 0) || 0));
+      // Strictly show MRP only. Never show or fallback to sellingPrice or cost rate.
+      const rawMrp =
+        matched?.mrp !== undefined && matched?.mrp !== null && String(matched.mrp).trim() !== ""
+          ? matched.mrp
+          : (item?.mrp !== undefined && item?.mrp !== null && String(item.mrp).trim() !== ""
+              ? item.mrp
+              : 0);
+
+      const parsedMrp = parseFloat(rawMrp);
+      const resolvedMrp = !isNaN(parsedMrp) && parsedMrp >= 0 ? parsedMrp : 0;
 
       const uiItemCode = (
         matched?.itemCode ||
@@ -912,13 +991,16 @@ const TransferOrderView = () => {
   };
 
   // Direct print barcode for all items in this transfer order (like in Bills page)
-  const handlePrintAllBarcodes = () => {
+  const handlePrintAllBarcodes = async () => {
     if (!transferOrder || !transferOrder.items || transferOrder.items.length === 0) {
       alert("No items in this transfer order to print.");
       return;
     }
 
-    const tagItems = buildTagItemsForItems(transferOrder.items);
+    showTagToast("Preparing barcode labels...", "loading");
+
+    const activeCatalog = await getCatalogForItems(transferOrder.items);
+    const tagItems = buildTagItemsForItems(transferOrder.items, activeCatalog);
     if (tagItems.length === 0) {
       alert("No items found to generate barcodes.");
       return;
@@ -930,10 +1012,13 @@ const TransferOrderView = () => {
   };
 
   // Direct print barcode for a single item row (like in Bills page)
-  const handlePrintSingleItemBarcode = (item) => {
+  const handlePrintSingleItemBarcode = async (item) => {
     if (!item) return;
 
-    const tagItems = buildTagItemsForItems([item]);
+    showTagToast("Preparing barcode label...", "loading");
+
+    const activeCatalog = await getCatalogForItems([item]);
+    const tagItems = buildTagItemsForItems([item], activeCatalog);
     if (tagItems.length === 0) {
       alert("Could not generate barcode for this item.");
       return;
