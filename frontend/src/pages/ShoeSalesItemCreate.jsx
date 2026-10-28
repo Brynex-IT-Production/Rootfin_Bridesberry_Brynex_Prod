@@ -373,6 +373,7 @@ const ShoeSalesItemCreate = () => {
                 reorderPoint: foundItem.reorderPoint || "",
                 sac: foundItem.sac || "",
                 size: sizeValue || "", // Set size from attributes
+                images: foundItem.images || (foundItem.image ? [foundItem.image] : []),
               }));
               setSkuManuallyEdited(!!(pieceSkuParam || foundItem.sku));
               setAttributeValues(foundItem.attributeCombination || []);
@@ -648,6 +649,8 @@ const handleCheckboxChange = (field) => (event) => {
           reorderPoint: formData.reorderPoint || "",
           sac: formData.type === "service" ? (formData.sac || "") : "",
           returnable: formData.returnable !== undefined ? formData.returnable : true,
+          images: formData.images || [],
+          image: (formData.images && formData.images[0]) || "",
         };
 
         let updatedItems;
@@ -678,11 +681,22 @@ const handleCheckboxChange = (field) => (event) => {
                 updatedAttributeCombination[ai] = newVal;
               }
               
-              // Regenerate item name from updated attributeCombination
+              // Determine updated item name:
               let updatedItemName = itemData.name.trim();
-              if (updatedAttributeCombination.length > 0) {
-                const optionsStr = updatedAttributeCombination.join("/");
-                updatedItemName = `${itemGroup.name} - ${optionsStr}`;
+
+              // Check if user explicitly changed the item name
+              const userChangedName = currentItem 
+                ? (updatedItemName !== (currentItem.name || "").trim())
+                : !!updatedItemName;
+
+              // Only regenerate name from attributes if the user did NOT change the name AND an attribute was changed, OR if name is empty
+              if ((!userChangedName && changedNextValues.size > 0 && updatedAttributeCombination.length > 0) || (!updatedItemName && updatedAttributeCombination.length > 0)) {
+                const optionsStr = updatedAttributeCombination.filter(Boolean).join("/");
+                if (optionsStr) {
+                  updatedItemName = `${itemGroup.name} - ${optionsStr}`;
+                } else if (!updatedItemName) {
+                  updatedItemName = itemGroup.name;
+                }
                 console.log(`Regenerated item name: "${updatedItemName}" from combination:`, updatedAttributeCombination);
               }
               

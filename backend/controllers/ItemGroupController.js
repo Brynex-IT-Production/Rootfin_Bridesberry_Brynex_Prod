@@ -1008,27 +1008,66 @@ export const updateItemGroup = async (req, res) => {
     }
 
     // Sync updated item SKU and details to bills
+    // Only sync items that were actually updated (or the specific itemId if provided)
     try {
       if (itemGroup && Array.isArray(itemGroup.items)) {
-        for (const item of itemGroup.items) {
-          const gItemId = (item._id || item.id)?.toString();
-          const gItemSku = item.sku?.trim();
-          if (gItemId && gItemSku) {
-            await Bill.updateMany(
-              { "items.itemId": gItemId },
-              {
-                $set: {
-                  "items.$[elem].itemSku": gItemSku,
-                  "items.$[elem].sku": gItemSku,
-                  ...(item.name ? { "items.$[elem].itemName": item.name } : {}),
-                  ...(item.hsnCode ? { "items.$[elem].hsnCode": item.hsnCode } : {}),
-                  ...(item.itemCode ? { "items.$[elem].itemCode": item.itemCode } : {}),
-                  ...(item.returnable !== undefined ? { "items.$[elem].returnable": item.returnable } : {})
-                }
-              },
-              { arrayFilters: [{ "elem.itemId": gItemId }] }
-            );
+        let itemsToSync = [];
+        const itemId = req.body.itemId;
+
+        if (itemId) {
+          // If a specific item was edited, only sync that item
+          const targetItem = itemGroup.items.find(i => {
+            const idStr = (i._id?.toString() || i.id || "").toString();
+            return idStr === itemId.toString();
+          });
+          if (targetItem && (targetItem.sku?.trim() || targetItem.name)) {
+            itemsToSync.push(targetItem);
           }
+        } else {
+          // Compare with oldItemGroup to find items whose bill-relevant fields actually changed
+          const oldItemsMap = new Map();
+          (oldItemGroup?.items || []).forEach(oi => {
+            const idStr = (oi._id?.toString() || oi.id || "").toString();
+            if (idStr) oldItemsMap.set(idStr, oi);
+          });
+
+          itemsToSync = itemGroup.items.filter(item => {
+            const idStr = (item._id?.toString() || item.id || "").toString();
+            const oldItem = oldItemsMap.get(idStr);
+            if (!oldItem) return !!item.sku?.trim(); // New item
+            return (
+              item.sku !== oldItem.sku ||
+              item.name !== oldItem.name ||
+              item.hsnCode !== oldItem.hsnCode ||
+              item.itemCode !== oldItem.itemCode ||
+              item.returnable !== oldItem.returnable
+            );
+          });
+        }
+
+        if (itemsToSync.length > 0) {
+          // Sync bills asynchronously in parallel without blocking the response
+          Promise.all(itemsToSync.map(async (item) => {
+            const gItemId = (item._id || item.id)?.toString();
+            const gItemSku = item.sku?.trim();
+            if (gItemId) {
+              await Bill.updateMany(
+                { "items.itemId": gItemId },
+                {
+                  $set: {
+                    ...(gItemSku ? { "items.$[elem].itemSku": gItemSku, "items.$[elem].sku": gItemSku } : {}),
+                    ...(item.name ? { "items.$[elem].itemName": item.name } : {}),
+                    ...(item.hsnCode ? { "items.$[elem].hsnCode": item.hsnCode } : {}),
+                    ...(item.itemCode ? { "items.$[elem].itemCode": item.itemCode } : {}),
+                    ...(item.returnable !== undefined ? { "items.$[elem].returnable": item.returnable } : {})
+                  }
+                },
+                { arrayFilters: [{ "elem.itemId": gItemId }] }
+              );
+            }
+          })).catch(err => {
+            console.warn("Async bill sync error on item group update:", err.message);
+          });
         }
       }
     } catch (billSyncErr) {

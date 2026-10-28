@@ -335,12 +335,13 @@ const ShoeSalesItemGroupCreate = () => {
             if (shouldUseAttributes) {
               // Items were generated from attributes
               const loadedItems = data.items.map(item => {
-                // Regenerate item name from attributeCombination to reflect any changes made in edit mode
+                // Preserve the saved item name from the database. Only fall back to auto-generating
+                // if the name is blank/empty.
                 let itemName = item.name || "";
-                if (item.attributeCombination && Array.isArray(item.attributeCombination) && item.attributeCombination.length > 0) {
-                  const optionsStr = item.attributeCombination.join("/");
+                if (!itemName && item.attributeCombination && Array.isArray(item.attributeCombination) && item.attributeCombination.length > 0) {
+                  const optionsStr = item.attributeCombination.filter(Boolean).join("/");
                   itemName = `${data.name || "Item"} - ${optionsStr}`;
-                  console.log(`Loading item: original name="${item.name}", regenerated name="${itemName}", attributeCombination=`, item.attributeCombination);
+                  console.log(`Loading item: name was empty, generated name="${itemName}"`);
                 }
                 
                 // Extract size from attributeCombination if size attribute exists
@@ -775,18 +776,28 @@ const ShoeSalesItemGroupCreate = () => {
         returnable,
         trackInventory: itemType === "goods",
         items: validItems.map(item => {
-          // Regenerate item name from attributeCombination before saving to ensure consistency
-          let itemName = item.name.trim();
+          let itemName = (item.name || "").trim();
+
+          // Only auto-generate name from attributes if:
+          // 1. The item name is empty, OR
+          // 2. It looks like it was previously auto-generated (matches "GroupName - attribute" pattern)
+          //    AND the user did NOT manually change it.
           if (createAttributes && item.attributeCombination && Array.isArray(item.attributeCombination) && item.attributeCombination.length > 0) {
-            const optionsStr = item.attributeCombination.join("/");
-            itemName = `${itemGroupName.trim()} - ${optionsStr}`;
+            const optionsStr = item.attributeCombination.filter(Boolean).join("/");
+            const autoName = optionsStr ? `${itemGroupName.trim()} - ${optionsStr}` : "";
+
+            if (!itemName || itemName === autoName) {
+              // Name is empty or exactly matches the auto-generated pattern → auto-generate
+              itemName = autoName || itemGroupName.trim();
+            }
+            // Otherwise, the user gave a custom name — preserve it.
           }
-          
+
           return {
-            _id: item._id && item._id.match(/^[0-9a-fA-F]{24}$/) ? item._id : undefined, // Only include _id if it's a valid MongoDB ObjectId
+            _id: item._id && item._id.match(/^[0-9a-fA-F]{24}$/) ? item._id : undefined,
             name: itemName,
             sku: item.sku || "",
-            size: item.size || "", // Include size field
+            size: item.size || "",
             costPrice: parseFloat(item.costPrice) || 0,
             sellingPrice: parseFloat(item.sellingPrice) || 0,
             mrp: parseFloat(item.mrp) > 0 ? parseFloat(item.mrp) : (parseFloat(item.sellingPrice) || 0),
@@ -795,10 +806,10 @@ const ShoeSalesItemGroupCreate = () => {
             isbn: item.isbn || "",
             reorderPoint: item.reorderPoint || "",
             sac: item.sac || "",
-            stock: parseFloat(item.stock) || 0, // Add stock field for each item
+            stock: parseFloat(item.stock) || 0,
             attributeCombination: item.attributeCombination || [],
-            returnable: null, // Items inherit returnable status from group
-            warehouseStocks: item.warehouseStocks || [], // PRESERVE warehouse stocks
+            returnable: null,
+            warehouseStocks: item.warehouseStocks || [],
           };
         }),
         stock: 0,
