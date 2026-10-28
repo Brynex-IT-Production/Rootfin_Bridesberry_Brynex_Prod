@@ -172,7 +172,7 @@ const generateChangeDetails = (oldItem, newItem, changeType) => {
     }
   } else {
     // General field changes
-    const fieldsToCheck = ['name', 'sku', 'costPrice', 'sellingPrice', 'stock', 'reorderPoint'];
+    const fieldsToCheck = ['name', 'sku', 'costPrice', 'sellingPrice', 'mrp', 'stock', 'reorderPoint'];
     fieldsToCheck.forEach(field => {
       if (oldItem?.[field] !== newItem?.[field]) {
         const oldVal = oldItem?.[field] ?? '';

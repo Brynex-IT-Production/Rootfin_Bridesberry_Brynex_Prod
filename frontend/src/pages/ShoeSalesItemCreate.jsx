@@ -116,6 +116,7 @@ const initialFormData = {
   size: "",
   inventoryValuationMethod: "",
   sellingPrice: "",
+  mrp: "",
   salesAccount: "",
   salesDescription: "",
   costPrice: "",
@@ -256,6 +257,9 @@ const ShoeSalesItemCreate = () => {
             size: data.size || "",
             inventoryValuationMethod: data.inventoryValuationMethod || data.inventoryValuation || "",
             sellingPrice: data.sellingPrice?.toString() || "",
+            mrp: (data.mrp !== undefined && data.mrp !== null && data.mrp !== "" && Number(data.mrp) > 0)
+              ? data.mrp.toString()
+              : (data.sellingPrice?.toString() || ""),
             salesAccount: data.salesAccount || "",
             salesDescription: data.salesDescription || "",
             costPrice: data.costPrice?.toString() || "",
@@ -360,6 +364,9 @@ const ShoeSalesItemCreate = () => {
                 sku: pieceSkuParam || foundItem.sku || "",
                 costPrice: foundItem.costPrice?.toString() || "",
                 sellingPrice: foundItem.sellingPrice?.toString() || "",
+                mrp: (foundItem.mrp !== undefined && foundItem.mrp !== null && foundItem.mrp !== "" && Number(foundItem.mrp) > 0)
+                  ? foundItem.mrp.toString()
+                  : (foundItem.sellingPrice?.toString() || ""),
                 upc: foundItem.upc || "",
                 hsnCode: foundItem.hsnCode || "",
                 isbn: foundItem.isbn || "",
@@ -485,6 +492,11 @@ const ShoeSalesItemCreate = () => {
     const value = event.target.value;
     setFormData((prev) => {
       const next = { ...prev, [field]: value };
+      if (field === "sellingPrice") {
+        if (!prev.mrp || prev.mrp === prev.sellingPrice) {
+          next.mrp = value;
+        }
+      }
       if ((field === "itemName" || field === "size") && !skuManuallyEdited) {
         const itemName = field === "itemName" ? value : prev.itemName;
         const size = field === "size" ? value : prev.size;
@@ -514,6 +526,7 @@ const handleCheckboxChange = (field) => (event) => {
 
     if (field === "sellable" && !checked) {
       next.sellingPrice = "";
+      next.mrp = "";
       next.salesAccount = "";
       next.salesDescription = "";
     }
@@ -626,6 +639,9 @@ const handleCheckboxChange = (field) => (event) => {
           sku: formData.sku || "",
           costPrice: formData.costPrice ? Number(formData.costPrice) : 0,
           sellingPrice: formData.sellingPrice ? Number(formData.sellingPrice) : 0,
+          mrp: formData.mrp !== "" && formData.mrp !== undefined && formData.mrp !== null
+            ? Number(formData.mrp)
+            : (formData.sellingPrice ? Number(formData.sellingPrice) : 0),
           upc: formData.upc || "",
           hsnCode: formData.hsnCode || "",
           isbn: formData.isbn || "",
@@ -856,6 +872,9 @@ const handleCheckboxChange = (field) => (event) => {
           trackingMethod,
           sellingPrice: formData.sellingPrice ? Number(formData.sellingPrice) : 0,
           costPrice: formData.costPrice ? Number(formData.costPrice) : 0,
+          mrp: formData.mrp !== "" && formData.mrp !== undefined && formData.mrp !== null
+            ? Number(formData.mrp)
+            : (formData.sellingPrice ? Number(formData.sellingPrice) : 0),
           warehouseStocks: standaloneItem?.warehouseStocks || [], // Preserve warehouse stocks
         };
 
@@ -924,6 +943,9 @@ const handleCheckboxChange = (field) => (event) => {
             trackingMethod,
             sellingPrice: formData.sellingPrice ? Number(formData.sellingPrice) : 0,
             costPrice: formData.costPrice ? Number(formData.costPrice) : 0,
+            mrp: formData.mrp !== "" && formData.mrp !== undefined && formData.mrp !== null
+              ? Number(formData.mrp)
+              : (formData.sellingPrice ? Number(formData.sellingPrice) : 0),
             changedBy: changedBy,
             createdBy: changedBy,
             userWarehouse: userWarehouse,
@@ -1306,15 +1328,26 @@ const handleCheckboxChange = (field) => (event) => {
                     </div>
                   )}
 
-                  <FloatingField
-                    label="Selling Price"
-                    placeholder="0.00"
-                    prefix="₹"
-                    name="sellingPrice"
-                    value={formData.sellingPrice}
-                    onChange={handleChange("sellingPrice")}
-                    disabled={!formData.sellable || status.loading}
-                  />
+                  <div className="grid gap-4 md:grid-cols-2">
+                    <FloatingField
+                      label="Selling Price"
+                      placeholder="0.00"
+                      prefix="₹"
+                      name="sellingPrice"
+                      value={formData.sellingPrice}
+                      onChange={handleChange("sellingPrice")}
+                      disabled={!formData.sellable || status.loading}
+                    />
+                    <FloatingField
+                      label="MRP"
+                      placeholder="0.00"
+                      prefix="₹"
+                      name="mrp"
+                      value={formData.mrp}
+                      onChange={handleChange("mrp")}
+                      disabled={!formData.sellable || status.loading}
+                    />
+                  </div>
 
                   {/* GST Summary */}
                   {shouldShowGSTSummary && gstDetails && (

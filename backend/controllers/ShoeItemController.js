@@ -221,7 +221,7 @@ const generateChangeDetails = (oldItem, newItem, changeType) => {
     }
   } else {
     // General field changes
-    const fieldsToCheck = ['itemName', 'sku', 'costPrice', 'sellingPrice', 'stock', 'reorderPoint'];
+    const fieldsToCheck = ['itemName', 'sku', 'costPrice', 'sellingPrice', 'mrp', 'stock', 'reorderPoint'];
     fieldsToCheck.forEach(field => {
       if (oldItem?.[field] !== newItem?.[field]) {
         const oldVal = oldItem?.[field] ?? '';
@@ -339,6 +339,9 @@ export const createShoeItem = async (req, res) => {
       sku: incomingSku,
       sellingPrice: req.body.sellingPrice ? Number(req.body.sellingPrice) : 0,
       costPrice: req.body.costPrice ? Number(req.body.costPrice) : 0,
+      mrp: req.body.mrp !== undefined && req.body.mrp !== null && req.body.mrp !== "" 
+        ? Number(req.body.mrp) 
+        : (req.body.sellingPrice ? Number(req.body.sellingPrice) : 0),
       createdBy: req.body.createdBy || changedBy,
       warehouseStocks: warehouseStocks, // Set the warehouse stocks
     };
@@ -798,6 +801,9 @@ export const updateShoeItem = async (req, res) => {
       itemName: req.body.itemName ? req.body.itemName.trim() : oldItem.itemName,
       sellingPrice: req.body.sellingPrice !== undefined ? Number(req.body.sellingPrice) : oldItem.sellingPrice,
       costPrice: req.body.costPrice !== undefined ? Number(req.body.costPrice) : oldItem.costPrice,
+      mrp: req.body.mrp !== undefined 
+        ? (req.body.mrp === "" || req.body.mrp === null ? 0 : Number(req.body.mrp)) 
+        : (oldItem.mrp !== undefined ? oldItem.mrp : oldItem.sellingPrice),
     };
 
     // Remove _id and __v from update data if present
